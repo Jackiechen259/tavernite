@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Tavernite</string>
+    <string name="notif_channel_generation">Generation</string>
+    <string name="notif_generating_title">Tavernite is generating</string>
+    <string name="notif_generating_text">Tap to return to the story.</string>
+    <string name="notif_stop">Stop</string>
+</resources>
