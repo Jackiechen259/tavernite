@@ -11,13 +11,10 @@ fi
 
 read -r -s -p "Keystore password: " store_pass
 echo
-read -r -s -p "Key password (Enter = same as keystore): " key_pass
-echo
-key_pass="${key_pass:-$store_pass}"
 
 keytool -genkeypair -v -keystore "$out" -alias "$alias_name" \
     -keyalg RSA -keysize 2048 -validity 10000 \
-    -storepass "$store_pass" -keypass "$key_pass" \
+    -storepass "$store_pass" -keypass "$store_pass" \
     -dname "CN=Tavernite, OU=Mobile, O=Tavernite, C=CN"
 
 echo
@@ -30,6 +27,6 @@ echo "Add these GitHub secrets:"
 echo "  RELEASE_KEYSTORE_BASE64=<base64 above>"
 echo "  RELEASE_STORE_PASSWORD=<keystore password>"
 echo "  RELEASE_KEY_ALIAS=$alias_name"
-echo "  RELEASE_KEY_PASSWORD=<key password>"
+echo "  RELEASE_KEY_PASSWORD=$store_pass"
 echo
-echo "Back up $out and both passwords. Losing them prevents in-place updates."
+echo "Back up $out and the password. Losing them prevents in-place updates."
