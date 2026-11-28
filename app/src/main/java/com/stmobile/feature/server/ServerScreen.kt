@@ -563,18 +563,8 @@ private fun AboutCard(
             )
 
             when (val update = state.updateState) {
-                UpdateState.Idle, UpdateState.UpToDate -> {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "检查是否有新的 Tavernite 版本。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        OutlinedButton(onClick = onCheckForUpdate) { Text("检查更新") }
-                    }
-                }
+                UpdateState.Idle, UpdateState.UpToDate ->
+                    CheckForUpdateRow(onCheckForUpdate = onCheckForUpdate)
 
                 UpdateState.Checking -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -637,12 +627,16 @@ private fun AboutCard(
                 }
 
                 is UpdateState.Failed -> {
-                    Text(
-                        text = update.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                    if (update.info != null) {
+                    if (update.info == null) {
+                        // A check failure is reported via the Snackbar only; keep
+                        // the manual check reachable if the shared state sticks.
+                        CheckForUpdateRow(onCheckForUpdate = onCheckForUpdate)
+                    } else {
+                        Text(
+                            text = update.message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
                         TextButton(onClick = onRetryUpdateDownload) { Text("重试") }
                     }
                 }
@@ -665,6 +659,20 @@ private fun AboutCard(
 
             TextButton(onClick = onOpenReleasePage) { Text("在 GitHub 查看 Releases") }
         }
+    }
+}
+
+@Composable
+private fun CheckForUpdateRow(onCheckForUpdate: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = "检查是否有新的 Tavernite 版本。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        Spacer(Modifier.width(8.dp))
+        OutlinedButton(onClick = onCheckForUpdate) { Text("检查更新") }
     }
 }
 
