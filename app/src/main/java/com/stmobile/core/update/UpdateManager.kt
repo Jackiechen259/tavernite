@@ -8,9 +8,11 @@ import com.stmobile.core.settings.SettingsStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -49,7 +51,7 @@ class UpdateManager @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val checkMutex = Mutex()
 
-    @Volatile
+    private val downloadLock = Any()
     private var downloadJob: Job? = null
 
     /**
@@ -82,6 +84,7 @@ class UpdateManager @Inject constructor(
 
     private suspend fun checkInternal(manual: Boolean): UpdateCheckOutcome =
         checkMutex.withLock {
+            val previous = _state.value
             _state.value = UpdateState.Checking
 
             try {
@@ -105,6 +108,9 @@ class UpdateManager @Inject constructor(
                     }
                 }
             } catch (e: CancellationException) {
+                // The owning ViewModel scope may be cancelled while the request
+                // is in flight; do not leave the shared state stuck in Checking.
+                if (_state.value == UpdateState.Checking) _state.value = previous
                 throw e
             } catch (e: Exception) {
                 val message = e.message?.takeIf { it.isNotBlank() } ?: "检查更新失败"
@@ -120,46 +126,67 @@ class UpdateManager @Inject constructor(
     /**
      * Starts downloading the available update, if any. Runs on a manager-owned
      * scope so navigation cannot cancel an in-flight download.
+     *
+     * The [downloadJob] reference is authoritative: while it is non-null no
+     * second download may start, even if the previous job has been cancelled
+     * but has not observed the cancellation yet. The job itself is started
+     * atomically so its cleanup always runs, even when cancelled before the
+     * dispatcher picks it up.
      */
     fun download() {
         val info = UpdateDialogPolicy.updateInfo(_state.value) ?: return
-        if (downloadJob?.isActive == true) return
 
-        _state.value = UpdateState.Downloading(info, bytes = 0, total = info.apkSize)
-        downloadJob = scope.launch {
-            try {
-                val apk = downloader.download(
-                    info = info,
-                    targetDir = File(context.cacheDir, "updates")
-                ) { bytes, total ->
-                    _state.value = UpdateState.Downloading(info, bytes, total)
+        synchronized(downloadLock) {
+            if (downloadJob != null) return
+
+            _state.value = UpdateState.Downloading(info, bytes = 0, total = info.apkSize)
+            downloadJob = scope.launch(start = CoroutineStart.ATOMIC) {
+                val self = currentCoroutineContext()[Job]!!
+                try {
+                    val apk = downloader.download(
+                        info = info,
+                        targetDir = File(context.cacheDir, "updates")
+                    ) { bytes, total ->
+                        if (isCurrentJob(self)) {
+                            _state.value = UpdateState.Downloading(info, bytes, total)
+                        }
+                    }
+                    if (isCurrentJob(self)) {
+                        _state.value = UpdateState.ReadyToInstall(
+                            info = info,
+                            apkPath = apk.absolutePath,
+                            needsPermission = !installer.canInstallPackages()
+                        )
+                    }
+                } catch (e: CancellationException) {
+                    if (isCurrentJob(self)) _state.value = UpdateState.Available(info)
+                    throw e
+                } catch (e: Exception) {
+                    if (isCurrentJob(self)) {
+                        val message = e.message?.takeIf { it.isNotBlank() } ?: "下载失败"
+                        _state.value = UpdateState.Failed(message, info)
+                    }
+                } finally {
+                    synchronized(downloadLock) {
+                        if (downloadJob === self) downloadJob = null
+                    }
                 }
-                _state.value = UpdateState.ReadyToInstall(
-                    info = info,
-                    apkPath = apk.absolutePath,
-                    needsPermission = !installer.canInstallPackages()
-                )
-            } catch (e: CancellationException) {
-                _state.value = UpdateState.Available(info)
-                throw e
-            } catch (e: Exception) {
-                val message = e.message?.takeIf { it.isNotBlank() } ?: "下载失败"
-                _state.value = UpdateState.Failed(message, info)
-            } finally {
-                downloadJob = null
             }
         }
     }
 
-    /** Cancels the active download and resets to [UpdateState.Available]. */
+    /**
+     * Cancels the active download, if any. The owning job resets the state and
+     * clears [downloadJob] when it unwinds; until then new downloads are
+     * refused, so a still-blocked request can never race a fresh download.
+     */
     fun cancelDownload() {
-        val job = downloadJob ?: return
+        val job = synchronized(downloadLock) { downloadJob } ?: return
         job.cancel()
-        // A coroutine cancelled before it is dispatched never runs its
-        // cancellation branch, so reset the state here as well.
-        val downloading = _state.value as? UpdateState.Downloading ?: return
-        _state.value = UpdateState.Available(downloading.info)
     }
+
+    private fun isCurrentJob(job: Job): Boolean =
+        synchronized(downloadLock) { downloadJob === job }
 
     /** Launches the system installer, requesting the unknown-sources permission first if needed. */
     fun install() {
@@ -184,7 +211,7 @@ class UpdateManager @Inject constructor(
 
     /** Persists the skipped version, closes the dialog and resets to [UpdateState.Idle]. */
     fun skipVersion(versionName: String) {
-        scope.launch { settings.setSkippedUpdateVersion(versionName) }
+        scope.launch { runCatching { settings.setSkippedUpdateVersion(versionName) } }
         _state.value = UpdateState.Idle
         _dismissedVersion.value = null
     }
@@ -211,6 +238,6 @@ class UpdateManager @Inject constructor(
 
     /** Persists the "check automatically on startup" preference. */
     fun setAutoUpdateCheck(enabled: Boolean) {
-        scope.launch { settings.setAutoUpdateCheck(enabled) }
+        scope.launch { runCatching { settings.setAutoUpdateCheck(enabled) } }
     }
 }
