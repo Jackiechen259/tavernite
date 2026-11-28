@@ -1,6 +1,5 @@
 package com.stmobile.core.update
 
-import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -45,7 +44,8 @@ class UpdateInstaller @Inject constructor(
      * Opens the package installer for [apk].
      *
      * @return false when the file is missing, cannot be exposed through the
-     * FileProvider, or no activity can handle the install intent.
+     * FileProvider, or the installer activity cannot be launched (missing or
+     * throwing, e.g. [SecurityException]).
      */
     fun install(apk: File): Boolean {
         if (!apk.exists()) return false
@@ -63,12 +63,8 @@ class UpdateInstaller @Inject constructor(
         return startActivity(intent)
     }
 
-    private fun startActivity(intent: Intent): Boolean = try {
-        context.startActivity(intent)
-        true
-    } catch (e: ActivityNotFoundException) {
-        false
-    }
+    private fun startActivity(intent: Intent): Boolean =
+        runCatching { context.startActivity(intent) }.isSuccess
 
     private companion object {
         val AUTHORITY = "${BuildConfig.APPLICATION_ID}.fileprovider"

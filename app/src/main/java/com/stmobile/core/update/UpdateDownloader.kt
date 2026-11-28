@@ -108,6 +108,11 @@ class UpdateDownloader @Inject constructor(private val client: OkHttpClient) {
                 }
             }
 
+            if (total > 0 && written != total) {
+                part.delete()
+                throw UpdateDownloadException("安装包下载不完整")
+            }
+
             return digest.digest().toHex()
         }
     }

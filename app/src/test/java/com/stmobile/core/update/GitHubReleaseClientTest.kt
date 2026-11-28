@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -34,7 +35,8 @@ class GitHubReleaseClientTest {
     private fun releaseJson(
         tag: String = "v0.2.0",
         apkName: String = "Tavernite-0.2.0-200.apk",
-        apkUrl: String = "https://github.com/Jackiechen259/tavernite/releases/download/v0.2.0/$apkName"
+        apkUrl: String = "https://github.com/Jackiechen259/tavernite/releases/download/v0.2.0/$apkName",
+        shaUrl: String? = null
     ) = """
         {
           "tag_name": "$tag",
@@ -44,7 +46,7 @@ class GitHubReleaseClientTest {
           "prerelease": false,
           "assets": [
             {"name": "$apkName", "browser_download_url": "$apkUrl", "size": 23000000},
-            {"name": "$apkName.sha256", "browser_download_url": "$apkUrl.sha256", "size": 80}
+            {"name": "$apkName.sha256", "browser_download_url": "${shaUrl ?: "$apkUrl.sha256"}", "size": 80}
           ]
         }
     """.trimIndent()
@@ -117,5 +119,58 @@ class GitHubReleaseClientTest {
         )
         val error = runCatching { client().checkForUpdate("0.1.0", 100) }.exceptionOrNull()
         assertTrue(error is UpdateCheckException)
+    }
+
+    @Test
+    fun `maps missing release to friendly error`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(404))
+        val error = runCatching { client().checkForUpdate("0.1.0", 100) }.exceptionOrNull()
+        assertTrue(error is UpdateCheckException)
+        assertEquals("找不到 Release，请检查网络或仓库地址", error?.message)
+    }
+
+    @Test
+    fun `maps server error to friendly error`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(500))
+        val error = runCatching { client().checkForUpdate("0.1.0", 100) }.exceptionOrNull()
+        assertTrue(error is UpdateCheckException)
+        assertEquals("GitHub API 请求失败（HTTP 500）", error?.message)
+    }
+
+    @Test
+    fun `fails on network interruption`() = runBlocking {
+        server.enqueue(
+            MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)
+        )
+        val error = runCatching { client().checkForUpdate("0.1.0", 100) }.exceptionOrNull()
+        assertTrue(error is UpdateCheckException)
+    }
+
+    @Test
+    fun `rejects untrusted apk host over https`() = runBlocking {
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .setBody(releaseJson(apkUrl = "https://evil.example/app.apk"))
+        )
+        val error = runCatching { client().checkForUpdate("0.1.0", 100) }.exceptionOrNull()
+        assertTrue(error is UpdateCheckException)
+    }
+
+    @Test
+    fun `rejects untrusted checksum host over https`() = runBlocking {
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .setBody(releaseJson(shaUrl = "https://evil.example/app.apk.sha256"))
+        )
+        val error = runCatching { client().checkForUpdate("0.1.0", 100) }.exceptionOrNull()
+        assertTrue(error is UpdateCheckException)
+    }
+
+    @Test
+    fun `reports malformed json`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{not json"))
+        val error = runCatching { client().checkForUpdate("0.1.0", 100) }.exceptionOrNull()
+        assertTrue(error is UpdateCheckException)
+        assertEquals("GitHub 返回了无法解析的数据", error?.message)
     }
 }

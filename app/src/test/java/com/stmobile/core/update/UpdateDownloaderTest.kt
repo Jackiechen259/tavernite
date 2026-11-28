@@ -100,4 +100,17 @@ class UpdateDownloaderTest {
         }.exceptionOrNull()
         assertTrue(error is UpdateDownloadException)
     }
+
+    @Test
+    fun `fails on truncated download`() = runBlocking {
+        val truncated = apkBytes.copyOf(apkBytes.size - 100)
+        server.enqueue(MockResponse().setChunkedBody(Buffer().write(truncated), 1024))
+        val dir = temp.newFolder("updates")
+        val error = runCatching {
+            UpdateDownloader(OkHttpClient()).download(info(null), dir)
+        }.exceptionOrNull()
+        assertTrue(error is UpdateDownloadException)
+        assertEquals("安装包下载不完整", error?.message)
+        assertTrue(dir.listFiles().isNullOrEmpty())
+    }
 }

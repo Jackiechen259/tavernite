@@ -2,7 +2,7 @@
 
 原生 Android（Kotlin + Jetpack Compose）SillyTavern 客户端。目标是在手机上获得单手可用的原生聊天体验，同时完整复用 SillyTavern 的前端业务逻辑——世界书、正则、宏、预设、酒馆助手与第三方扩展。
 
-> 当前进度：**Phase 1–4 已实现并通过构建验证**（`:app:assembleDebug`、`:app:testDebugUnitTest` 45 项测试、`:app:lintDebug`），真机与真实 ST 服务器联调待验收。
+> 当前进度：**Phase 1–4 已实现并通过构建验证**（`:app:assembleDebug`、`:app:testDebugUnitTest` 75 项测试、`:app:lintDebug`），真机与真实 ST 服务器联调待验收。
 
 ## 架构
 
@@ -86,7 +86,7 @@
 
 APK 输出：`app/build/outputs/apk/debug/app-debug.apk`。
 
-> 已验证：JDK 17 + Android SDK 35 下 `:app:assembleDebug` 成功（APK 约 22 MB），`:app:testDebugUnitTest` 45 项通过，`:app:lintDebug` 无 error。真机安装、真实 ST 服务器鉴权/流式生成与第三方扩展仍需实机验收。
+> 已验证：JDK 17 + Android SDK 35 下 `:app:assembleDebug` 成功（APK 约 22 MB），`:app:testDebugUnitTest` 75 项通过，`:app:lintDebug` 无 error。真机安装、真实 ST 服务器鉴权/流式生成与第三方扩展仍需实机验收。
 
 ## 使用
 
@@ -176,8 +176,13 @@ app/src/main/assets/css/extension_mobile.css
    `Tavernite-<版本>-<versionCode>.apk` 与 `.sha256`。
 
 > keystore 与密码必须备份。丢失后已安装用户无法覆盖升级，只能卸载重装。
-> 本地 release 构建：在根目录创建被 gitignore 的 `keystore.properties`，然后
+> 本地 release 构建：在根目录创建被 gitignore 的 `keystore.properties`，包含
+> `storeFile`、`storePassword`、`keyAlias`、`keyPassword` 四个键，然后
 > `./gradlew :app:assembleRelease -PversionName=0.1.1 -PversionCode=101`。
+>
+> **本地签名与 CI 签名不通用：** 本地 release 构建的 `applicationId` 同为
+> `com.stmobile`，但签名密钥与 CI 不同。安装 CI 签名 APK 前必须先卸载本地签名的
+> release 包，否则系统会因签名不一致拒绝覆盖安装（卸载会清除应用内数据，请先备份）。
 
 ## 自动更新
 
@@ -195,7 +200,7 @@ release 构建内置应用内更新（`core/update`）；debug 构建完全不�
 2. 点击“下载并安装”，APK 下载到应用缓存目录，下载过程中同步计算 SHA-256。
 3. 若 Release 提供了 `<apk>.sha256` 资产，则下载并比对校验值；不一致会提示“安装包校验失败”并删除下载文件。
 4. 校验通过后交给系统安装器覆盖安装；应用只从 GitHub API 返回的 `github.com` / `*.githubusercontent.com` HTTPS 地址下载。
-5. 首次安装需要允许 Tavernite“安装未知应用”。未授权时应用会跳转系统授权页；授权后回到 **连接** → **关于** 或弹窗点击“安装”继续。
+5. 下载完成后弹窗标题显示“vX.Y.Z 已下载”。若尚未允许 Tavernite“安装未知应用”，弹窗按钮显示“去允许安装”并跳转系统授权页；授权返回后需再次点击“安装”，才会交给系统安装器。弹窗关闭后也可从 **连接** → **关于** 的“安装”入口继续。
 
 ### “稍后”“跳过此版本”与重试
 
@@ -207,6 +212,7 @@ release 构建内置应用内更新（`core/update`）；debug 构建完全不�
 ### 包名、构建类型与仓库配置
 
 - release 包名 `com.stmobile`，debug 包名 `com.stmobile.debug`，两者可共存，互不覆盖。
+- 本地签名的 release 构建与 CI 签名 APK 包名同为 `com.stmobile`，但签名密钥不同；安装 CI 签名 APK 前需先卸载本地签名版本，否则会因签名不一致被拒绝覆盖安装（卸载会清除应用内数据）。
 - 更新功能只在 release 构建启用；debug 构建的“关于”区显示“调试构建不参与自动更新”，不会检查、下载或安装。
 - GitHub API 为公开接口，**无需配置 token**。仓库与节流参数在 `app/src/main/java/com/stmobile/core/update/UpdateConfig.kt`（`OWNER`、`REPO`、`CHECK_INTERVAL_MS`）；若仓库改名，必须同步修改 `OWNER`/`REPO`。若仓库转为私有，匿名 API 会返回 404，应用内更新将不可用（本应用不内置 token），手动检查会提示错误并保留“在 GitHub 查看”入口。
 
